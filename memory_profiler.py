@@ -32,7 +32,7 @@ import psutil
 
 # TODO: provide alternative when multiprocessing is not available
 try:
-    from multiprocessing import Process, Pipe
+    from multiprocessing import Process, Pipe, connection as mp_conn
 except ImportError:
     from multiprocessing.dummy import Process, Pipe
 
@@ -379,6 +379,9 @@ def memory_usage(proc=-1, interval=.1, timeout=None, timestamps=False,
             try:
                 returned = f(*args, **kw)
                 parent_conn.send(0)  # finish timing
+                handles = mp_conn.wait([p.sentinel, parent_conn])
+                if p.sentinel in handles:
+                    raise RuntimeError("MemTimer child died")
                 ret = parent_conn.recv()
                 n_measurements = parent_conn.recv()
                 if max_usage:
