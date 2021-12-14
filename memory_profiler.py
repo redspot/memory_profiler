@@ -19,7 +19,6 @@ import pdb
 import subprocess
 import sys
 import time
-import traceback
 import warnings
 
 if sys.platform == "win32":
@@ -88,7 +87,8 @@ def _get_child_memory(process, meminfo_attr=None, memory_metric=0):
     """
     # Convert a pid to a process
     if isinstance(process, int):
-        if process == -1: process = os.getpid()
+        if process == -1:
+            process = os.getpid()
         process = psutil.Process(process)
 
     if not meminfo_attr:
@@ -137,7 +137,7 @@ def _get_memory(pid, backend, timestamps=False, include_children=False, filename
                 else 'get_memory_info'
             mem = getattr(process, meminfo_attr)()[0] / _TWO_20
             if include_children:
-                mem +=  sum(_get_child_memory(process, meminfo_attr))
+                mem += sum(_get_child_memory(process, meminfo_attr))
             if timestamps:
                 return mem, time.time()
             else:
@@ -164,13 +164,13 @@ def _get_memory(pid, backend, timestamps=False, include_children=False, filename
             mem = getattr(meminfo, memory_metric) / _TWO_20
 
             if include_children:
-                mem +=  sum(_get_child_memory(process, meminfo_attr, memory_metric))
+                mem += sum(_get_child_memory(process, meminfo_attr, memory_metric))
 
             if timestamps:
                 return mem, time.time()
             else:
                 return mem
-        
+
         except psutil.AccessDenied:
             pass
             # continue and try to get this from ps
@@ -199,7 +199,7 @@ def _get_memory(pid, backend, timestamps=False, include_children=False, filename
                 return mem, time.time()
             else:
                 return mem
-        except:
+        except Exception:
             if timestamps:
                 return -1, time.time()
             else:
@@ -311,9 +311,9 @@ def memory_usage(proc=-1, interval=.1, timeout=None, timestamps=False,
 
     backend : str, optional
         Current supported backends: 'psutil', 'psutil_pss', 'psutil_uss', 'posix', 'tracemalloc'
-        If `backend=None` the default is "psutil" which measures RSS aka “Resident Set Size”. 
+        If `backend=None` the default is "psutil" which measures RSS aka “Resident Set Size”.
         For more information on "psutil_pss" (measuring PSS) and "psutil_uss" please refer to:
-        https://psutil.readthedocs.io/en/latest/index.html?highlight=memory_info#psutil.Process.memory_full_info 
+        https://psutil.readthedocs.io/en/latest/index.html?highlight=memory_info#psutil.Process.memory_full_info
 
     max_iterations : int
         Limits the number of iterations (calls to the process being monitored). Relevent
@@ -1230,12 +1230,11 @@ def choose_backend(new_backend=None):
 # for all cases, e.g. a script that imports another
 # script where @profile is used)
 def exec_with_profiler(filename, profiler, backend, passed_args=[]):
-    from runpy import run_module
     builtins.__dict__['profile'] = profiler
     ns = dict(_CLEAN_GLOBALS,
               profile=profiler,
-             # Make sure the __file__ variable is usable
-             # by the script we're profiling
+              # Make sure the __file__ variable is usable
+              # by the script we're profiling
               __file__=filename)
     # Make sure the script's directory in on sys.path
     # credit to line_profiler
