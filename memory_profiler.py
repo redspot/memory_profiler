@@ -104,9 +104,10 @@ def _get_child_memory(process, meminfo_attr=None, memory_metric=0):
         for child in getattr(process, children_attr)(recursive=True):
             if isinstance(memory_metric, str):
                 meminfo = getattr(child, meminfo_attr)()
-                yield getattr(meminfo, memory_metric) / _TWO_20
+                child_mem = getattr(meminfo, memory_metric)
             else:
-                yield getattr(child, meminfo_attr)()[memory_metric] / _TWO_20
+                child_mem = getattr(child, meminfo_attr)()[memory_metric]
+            yield 0.0 if child_mem is None else child_mem / _TWO_20
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         # https://github.com/fabianp/memory_profiler/issues/71
         yield 0.0
@@ -135,7 +136,8 @@ def _get_memory(pid, backend, timestamps=False, include_children=False, filename
             # in psutil > 2.0 and accessing it will cause exception.
             meminfo_attr = 'memory_info' if hasattr(process, 'memory_info') \
                 else 'get_memory_info'
-            mem = getattr(process, meminfo_attr)()[0] / _TWO_20
+            mem = getattr(process, meminfo_attr)()[0]
+            mem = -1 if mem is None else mem / _TWO_20
             if include_children:
                 mem += sum(_get_child_memory(process, meminfo_attr))
             if timestamps:
@@ -161,7 +163,8 @@ def _get_memory(pid, backend, timestamps=False, include_children=False, filename
                 raise NotImplementedError(
                     "Metric `{}` not available. For details, see:".format(memory_metric) +
                     "https://psutil.readthedocs.io/en/latest/index.html?highlight=memory_info#psutil.Process.memory_full_info")
-            mem = getattr(meminfo, memory_metric) / _TWO_20
+            mem = getattr(meminfo, memory_metric)
+            mem = -1 if mem is None else mem / _TWO_20
 
             if include_children:
                 mem += sum(_get_child_memory(process, meminfo_attr, memory_metric))
