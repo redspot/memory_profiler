@@ -1,4 +1,5 @@
 """Profile the memory usage of a Python program"""
+# flake8: noqa
 
 # .. we'll use this to pass it to the child script ..
 _CLEAN_GLOBALS = globals().copy()
@@ -34,7 +35,7 @@ import psutil
 try:
     from multiprocessing import Process, Pipe, connection as mp_conn
 except ImportError:
-    from multiprocessing.dummy import Process, Pipe
+    from multiprocessing.dummy import Process, Pipe, connection as mp_conn
 
 try:
     from IPython.core.magic import Magics, line_cell_magic, magics_class
@@ -149,32 +150,40 @@ def _get_memory(pid, backend, timestamps=False, include_children=False, filename
             # continue and try to get this from ps
 
     def _ps_util_full_tool(memory_metric):
+        print("start: _ps_util_full_tool")
 
         # .. cross-platform but requires psutil > 4.0.0 ..
+        print(f"psutil.Process={psutil.Process}")
         process = psutil.Process(pid)
         try:
             if not hasattr(process, 'memory_full_info'):
                 raise NotImplementedError("Backend `{}` requires psutil > 4.0.0".format(memory_metric))
 
             meminfo_attr = 'memory_full_info'
-            meminfo = getattr(process, meminfo_attr)()
+            meminfo_func = getattr(process, meminfo_attr)
+            print(f"meminfo_func={meminfo_func}")
+            meminfo = meminfo_func()
+            print(f"meminfo={meminfo}")
 
             if not hasattr(meminfo, memory_metric):
                 raise NotImplementedError(
                     "Metric `{}` not available. For details, see:".format(memory_metric) +
                     "https://psutil.readthedocs.io/en/latest/index.html?highlight=memory_info#psutil.Process.memory_full_info")
             mem = getattr(meminfo, memory_metric)
+            print(f"mem={mem}")
             mem = -1 if mem is None else mem / _TWO_20
 
             if include_children:
                 mem += sum(_get_child_memory(process, meminfo_attr, memory_metric))
 
+            print("end: _ps_util_full_tool")
             if timestamps:
                 return mem, time.time()
             else:
                 return mem
 
         except psutil.AccessDenied:
+            print("except: _ps_util_full_tool")
             pass
             # continue and try to get this from ps
 
@@ -240,19 +249,28 @@ class MemTimer(Process):
         self.timestamps = kw.pop("timestamps", False)
         self.include_children = kw.pop("include_children", False)
 
+        print("init: calling _get_memory()")
         # get baseline memory usage
         self.mem_usage = [
             _get_memory(self.monitor_pid, self.backend, timestamps=self.timestamps,
                         include_children=self.include_children)]
+        print(f"init: self.mem_usage={self.mem_usage}")
+        print("child init _get_memory", _get_memory)
         super(MemTimer, self).__init__(*args, **kw)
+        print(f"init: kids={[c.pid for c in psutil.Process().children()]}")
 
     def run(self):
+        print("child run _get_memory", _get_memory)
+        me = psutil.Process()
+        print(f"child: me={me.pid} ppid={me.ppid()}")
         self.pipe.send(0)  # we're ready
         stop = False
         while True:
+            print("loop: calling _get_memory()")
             cur_mem = _get_memory(
                 self.monitor_pid, self.backend, timestamps=self.timestamps,
                 include_children=self.include_children,)
+            print(f"loop: cur_mem={cur_mem}")
             if not self.max_usage:
                 self.mem_usage.append(cur_mem)
             else:
@@ -364,6 +382,24 @@ def memory_usage(proc=-1, interval=.1, timeout=None, timestamps=False,
             raise ValueError
 
         current_iter = 0
+
+        def check_safe_to_recv(child, conn):
+            """check if safe to call recv()
+
+            do not call conn.recv() if the child died, which may have happened
+            after the recv() call. so, wait until the child sends something or dies.
+            otherwise, the parent hangs indefinitely.
+
+            :param child: MemTimer instance
+            :param conn: multiprocessing.connection.Connection,
+                usually the parent end from Pipe()
+            :raises RuntimeError:
+                if the child is dead.
+            """
+            handles = mp_conn.wait([child.sentinel, conn])
+            if child.sentinel in handles:
+                raise RuntimeError("MemTimer child died")
+
         while True:
             current_iter += 1
             child_conn, parent_conn = Pipe()  # this will store MemTimer's results
@@ -371,7 +407,10 @@ def memory_usage(proc=-1, interval=.1, timeout=None, timestamps=False,
                          timestamps=timestamps,
                          max_usage=max_usage,
                          include_children=include_children)
+            print("MemTimer", p, type(p), p.__class__.__bases__)
+            print("parent _get_memory", _get_memory)
             p.start()
+            check_safe_to_recv(p, parent_conn)
             parent_conn.recv()  # wait until we start getting memory
 
             # When there is an exception in the "proc" - the (spawned) monitoring processes don't get killed.
@@ -379,9 +418,7 @@ def memory_usage(proc=-1, interval=.1, timeout=None, timestamps=False,
             try:
                 returned = f(*args, **kw)
                 parent_conn.send(0)  # finish timing
-                handles = mp_conn.wait([p.sentinel, parent_conn])
-                if p.sentinel in handles:
-                    raise RuntimeError("MemTimer child died")
+                check_safe_to_recv(p, parent_conn)
                 ret = parent_conn.recv()
                 n_measurements = parent_conn.recv()
                 if max_usage:
